@@ -1,0 +1,47 @@
+pacman_game/
+├─ main.py                     # punto de entrada del juego
+├─ config.py                   # constantes globales (pantalla, colores, etc.)
+│
+├─ core/                       # motor base
+│  ├─ game.py                  # Game loop (update, draw, eventos)
+│  ├─ renderer.py              # manejo del renderizado
+│  ├─ input.py                 # entrada de teclado
+│  └─ resource_manager.py      # carga de imágenes, sonidos, etc.
+│
+├─ entities/                   # personajes y objetos del juego
+│  ├─ entity.py                # clase base (pos, velocidad, sprite)
+│  ├─ pacman.py                # jugador
+│  ├─ ghost.py                 # enemigos
+│  └─ pellet.py                # puntos y frutas
+│
+├─ powerups/                   # distintos tipos de power-ups
+│  ├─ powerup.py               # clase base PowerUp
+│  ├─ speed_boost.py           # acelera al jugador
+│  ├─ invincibility.py         # vuelve inmune a Pacman
+│  └─ time_freeze.py           # congela a los fantasmas
+│
+├─ levels/
+│  ├─ level.py                 # carga y renderiza el mapa
+│  └─ maps/                    # mapas en txt o json
+│      └─ level1.txt
+│
+├─ ui/
+│  ├─ hud.py                   # puntuación, vidas, etc.
+│  └─ menu.py                  # pantalla inicial o pausa
+│
+├─ assets/
+│  ├─ sprites/
+│  │   ├─ pacman.png
+│  │   ├─ ghost_red.png
+│  │   └─ pellets.png
+│  ├─ sounds/
+│  │   ├─ eat.wav
+│  │   ├─ powerup.wav
+│  │   └─ death.wav
+│  └─ fonts/
+│      └─ arcade.ttf
+│
+└─ tests/
+    ├─ test_powerups.py
+    ├─ test_collision.py
+    └─ test_level_loading.py
