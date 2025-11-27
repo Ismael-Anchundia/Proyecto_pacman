@@ -7,7 +7,7 @@ from core.sprite_loader import load_folder
 
 class Pacman(Entity):
     def __init__(self, x, y, level=None):
-        super().__init__(x, y, speed=100)
+        super().__init__(x, y, speed=140)
         self.level = level
 
         # Direcciones

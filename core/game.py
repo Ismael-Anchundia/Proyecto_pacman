@@ -10,6 +10,8 @@ from powerups.speed_boost import SpeedBoost
 from powerups.invincibility import Invincibility
 from powerups.time_freeze import TimeFreeze
 from powerups.score_multiplier import ScoreMultiplier
+from powerups.fright_mode import FrightMode
+
 
 from config import SCREEN_WIDTH, SCREEN_HEIGHT, FPS, DARK_BLUE
 from core.renderer import Renderer, TILE_SIZE
@@ -44,6 +46,9 @@ class Game:
         self.renderer = Renderer(self.screen)
         self.menu = Menu()
         self.hud = HUD()
+        # Contador de combo de fantasmas comidos
+        self.ghost_combo = 0
+
 
         # Nivel inicial (placeholder)
         self.level = Level("levels/maps/level1.json", game=self)
@@ -127,33 +132,66 @@ class Game:
     # ================================================================
     def update(self, dt):
         if self.state == "GAME":
+
+            # --- Pac-Man ---
             self.pacman.update(dt)
 
-            # Actualizar fantasmas
+            # --- Fantasmas ---
             for ghost in self.ghosts:
                 ghost.update(dt)
 
-                # Colisión Pac-Man ↔ Fantasma
+                # ===========================
+                # COLISIÓN PAC-MAN ↔ FANTASMA
+                # ===========================
                 if self.pacman.collides_with(ghost):
 
-                    # Si está invencible → come fantasma
+                    # 1. Fantasma vulnerable (fright o blink)
+                    if ghost.state in ["fright", "blink"]:
+
+                        # combo como Pac-Man clásico
+                        self.ghost_combo += 1  
+
+                        # puntos del combo
+                        points = 200 * (2 ** (self.ghost_combo - 1))
+                        self.hud.add_score(points)
+
+                        # fantasma → ojos
+                        ghost.enter_eyes()
+
+                        continue  # NO daña a Pac-Man
+
+
+                    # 2. Pac-Man invencible (otro power-up)
                     if self.pacman.invincible:
-                        self.hud.add_ghost_points()
+                        self.ghost_combo += 1
+                        points = 200 * (2 ** (self.ghost_combo - 1))
+                        self.hud.add_score(points)
 
-                        if self.level.ghost_spawns:
-                            spawn_col, spawn_row = random.choice(self.level.ghost_spawns)
-                            ghost.x = spawn_col * TILE_SIZE + TILE_SIZE // 2
-                            ghost.y = spawn_row * TILE_SIZE + TILE_SIZE // 2
+                        ghost.enter_eyes()
+                        continue
 
-                    else:
-                        # Pierde vida
-                        self.handle_pacman_hit()
-                        return
+                    # 3. Fantasma normal → Pac-Man pierde vida
+                    self.ghost_combo = 0   # reset combo
+                    self.handle_pacman_hit()
+                    return
 
-            # ¿Nivel completado?
-            if len(self.level.pellets) == 0 and len(self.level.powerups) == 0:
-                self.current_level += 1
-                self.load_next_level()
+
+            # ========================================
+            # REVISAR FIN DEL FRIGHT MODE GLOBAL
+            # (si ningún fantasma está en fright/blink)
+            # ========================================
+            any_fright = any(g.state in ["fright","blink"] for g in self.ghosts)
+            if not any_fright:
+                self.ghost_combo = 0   # reset combo
+
+
+        # ========================================
+        # ¿Nivel completado?
+        # ========================================
+        if len(self.level.pellets) == 0 and len(self.level.powerups) == 0:
+            self.current_level += 1
+            self.load_next_level()
+
 
     # ================================================================
     # RENDER
@@ -253,7 +291,8 @@ class Game:
             SpeedBoost(),
             Invincibility(),
             TimeFreeze(),
-            ScoreMultiplier()
+            ScoreMultiplier(),
+            FrightMode()
         ])
         pacman.add_effect(p)
 
