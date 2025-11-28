@@ -1,75 +1,97 @@
 # levels/level_loader.py
 import json
-
-def load_level_file(path):
-    """
-    Detecta automáticamente si el archivo es .txt o .json
-    y retorna un diccionario con los datos del nivel.
-    """
-    if path.endswith(".json"):
-        return load_json_level(path)
-    else:
-        return load_txt_level(path)
+from functools import partial
 
 
-# -------------------------
-# CARGA DE MAPA TXT
-# -------------------------
-def load_txt_level(path):
-    data = {
-        "tiles": [],
-        "pacman_spawn": [1, 1],
-        "ghost_spawns": [],
-        "pellets": [],
-        "powerups": []
+# ==========================================================
+# AUXILIARES FUNCIONALES
+# ==========================================================
+
+def read_file(path):
+    """Pura: solo lee texto."""
+    with open(path, "r") as f:
+        return f.readlines()
+
+
+def parse_txt_lines(lines):
+    """Pura: convierte líneas TXT en estructura de nivel."""
+    tiles = tuple(line.rstrip("\n") for line in lines)
+
+    pellets = []
+    powerups = []
+    ghost_spawns = []
+    pacman_spawn = (1, 1)
+
+    for r, row in enumerate(tiles):
+        for c, ch in enumerate(row):
+            if ch == ".":
+                pellets.append((c, r))
+            elif ch == "o":
+                powerups.append((c, r))
+            elif ch == "P":
+                pacman_spawn = (c, r)
+            elif ch == "G":
+                ghost_spawns.append((c, r))
+
+    return {
+        "tiles": tiles,
+        "pellets": tuple(pellets),
+        "powerups": tuple(powerups),
+        "ghost_spawns": tuple(ghost_spawns),
+        "pacman_spawn": pacman_spawn,
     }
 
-    with open(path, "r") as f:
-        for row_index, line in enumerate(f):
-            row = line.rstrip("\n")
-            data["tiles"].append(row)
 
-            for col_index, char in enumerate(row):
-                if char == ".":
-                    data["pellets"].append([col_index, row_index])
-                elif char == "o":
-                    data["powerups"].append([col_index, row_index])
-                elif char == "P":
-                    data["pacman_spawn"] = [col_index, row_index]
-                elif char == "G":
-                    data["ghost_spawns"].append([col_index, row_index])
+# ==========================================================
+# TXT LOADER (100% funcional)
+# ==========================================================
 
-    return data
+def load_txt_level(path):
+    return parse_txt_lines(read_file(path))
 
 
-# -------------------------
-# CARGA DE MAPA JSON
-# -------------------------
+# ==========================================================
+# JSON LOADER (semi-funcional, conserva compatibilidad)
+# ==========================================================
+
 def load_json_level(path):
     with open(path, "r") as f:
-        level_data = json.load(f)
+        data = json.load(f)
 
-    # Validamos estructura mínima
-    if "tiles" not in level_data:
+    if "tiles" not in data:
         raise ValueError("El JSON debe contener una lista 'tiles'.")
 
-    # Completar campos opcionales con defaults
-    level_data.setdefault("pacman_spawn", [1, 1])
-    level_data.setdefault("ghost_spawns", [])
-    level_data.setdefault("pellets", [])
-    level_data.setdefault("powerups", [])
+    tiles = tuple(data["tiles"])
+    pellets = tuple(tuple(p) for p in data.get("pellets", []))
+    powerups = tuple(tuple(p) for p in data.get("powerups", []))
+    ghost_spawns = tuple(tuple(p) for p in data.get("ghost_spawns", []))
+    pacman_spawn = tuple(data.get("pacman_spawn", (1, 1)))
 
-    # Si el JSON no incluye pellets, los generamos desde el layout
-    if len(level_data["pellets"]) == 0:
-        for row_idx, row in enumerate(level_data["tiles"]):
-            for col_idx, char in enumerate(row):
-                if char == ".":
-                    level_data["pellets"].append([col_idx, row_idx])
-                if char == "o":
-                    level_data["powerups"].append([col_idx, row_idx])
-                if char == "G":
-                    level_data["ghost_spawns"].append([col_idx, row_idx])
-                if char.upper() == "P":
-                    level_data["pacman_spawn"] = [col_idx, row_idx]
+    # Autogenerar pellets si no existen
+    if len(pellets) == 0 and len(powerups) == 0:
+        gen_p = []
+        gen_o = []
+        for r, row in enumerate(tiles):
+            for c, ch in enumerate(row):
+                if ch == ".":
+                    gen_p.append((c, r))
+                elif ch == "o":
+                    gen_o.append((c, r))
+        pellets = tuple(gen_p)
+        powerups = tuple(gen_o)
 
-    return level_data
+    return {
+        "tiles": tiles,
+        "pellets": pellets,
+        "powerups": powerups,
+        "ghost_spawns": ghost_spawns,
+        "pacman_spawn": pacman_spawn,
+    }
+
+
+# ==========================================================
+# SELECCIÓN AUTOMÁTICA
+# ==========================================================
+
+def load_level_file(path):
+    return load_json_level(path) if path.endswith(".json") else load_txt_level(path)

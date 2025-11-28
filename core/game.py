@@ -1,19 +1,17 @@
 # core/game.py
 import pygame
 import time
-import sys
 import random
 
 from difficulty import DIFFICULTY_PRESETS
 
 from powerups.speed_boost import SpeedBoost
-from powerups.invincibility import Invincibility
 from powerups.time_freeze import TimeFreeze
 from powerups.score_multiplier import ScoreMultiplier
 from powerups.fright_mode import FrightMode
 
-
-from config import SCREEN_WIDTH, SCREEN_HEIGHT, FPS, DARK_BLUE
+import config
+from config import FPS, DARK_BLUE
 from core.renderer import Renderer, TILE_SIZE
 from levels.level import Level
 from entities.pacman import Pacman
@@ -27,7 +25,8 @@ class Game:
         pygame.init()
         pygame.mixer.init()
 
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        # Pantalla FULLSCREEN
+        self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
         pygame.display.set_caption("Pac-Man")
 
         self.clock = pygame.time.Clock()
@@ -36,37 +35,70 @@ class Game:
         self.dt = 0
         self.last_time = time.perf_counter()
 
-        # Estados del juego
+        # Estado
         self.state = "MENU"
 
-        # Valores iniciales
+        # Dificultad
         self.difficulty = DIFFICULTY_PRESETS["NORMAL"]
         self.current_level = 1
 
-        self.renderer = Renderer(self.screen)
         self.menu = Menu()
         self.hud = HUD()
-        # Contador de combo de fantasmas comidos
+
         self.ghost_combo = 0
 
-
-        # Nivel inicial (placeholder)
+        # Cargar nivel
         self.level = Level("levels/maps/level1.json", game=self)
 
-        # Crear Pac-Man
-        spawn_col, spawn_row = self.level.pacman_spawn
-        spawn_x = spawn_col * TILE_SIZE + TILE_SIZE // 2
-        spawn_y = spawn_row * TILE_SIZE + TILE_SIZE // 2
-        self.pacman = Pacman(spawn_x, spawn_y, level=self.level)
+        # Surface interna
+        self.map_width  = len(self.level.tiles[0]) * TILE_SIZE
+        self.map_height = len(self.level.tiles) * TILE_SIZE
 
-        # Crear fantasmas iniciales
+        self.game_surface = pygame.Surface((self.map_width, self.map_height))
+        self.renderer = Renderer(self.game_surface)
+
+        # Pac-Man
+        spawn_col, spawn_row = self.level.pacman_spawn
+        self.pacman = Pacman(
+            spawn_col * TILE_SIZE + TILE_SIZE // 2,
+            spawn_row * TILE_SIZE + TILE_SIZE // 2,
+            self.level
+        )
+
+        # Fantasmas
         self.ghosts = []
-        for col, row in self.level.ghost_spawns:
+        self.ghost_colors = ["red", "pink", "blue", "orange"]
+        self.spawn_ghosts_for_level()
+
+    # ================================================================
+    # CREACIÓN DE FANTASMAS
+    # ================================================================
+    def spawn_ghosts_for_level(self, speed=None):
+
+        if speed is None:
+            base = self.difficulty["ghost_speed"]
+            growth = self.difficulty["ghost_speed_growth"]
+            speed = base * (growth ** (self.current_level - 1))
+
+        self.ghosts = []
+
+        for i, (col, row) in enumerate(self.level.ghost_spawns):
+
             gx = col * TILE_SIZE + TILE_SIZE // 2
             gy = row * TILE_SIZE + TILE_SIZE // 2
-            colors = ["red", "pink", "blue", "orange"]
-            i = len(self.ghosts) % 4
-            self.ghosts.append(Ghost(gx, gy, self.level, color=colors[i]))
+
+            color = self.ghost_colors[i % len(self.ghost_colors)]
+            ghost = Ghost(gx, gy, self.level, color=color, speed=speed)
+
+            # Si está en la casita → inicia en modo "house"
+            if (col, row) in self.level.ghost_house_area:
+                ghost.state = "house"
+                ghost.dir_x = 0
+                ghost.dir_y = 0
+                ghost.house_timer = 0.8 + i * 0.6
+
+            self.ghosts.append(ghost)
+
 
 
     # ================================================================
@@ -93,7 +125,6 @@ class Game:
             if event.type == pygame.QUIT:
                 self._running = False
 
-            # MENÚ
             if self.state == "MENU":
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_UP:
@@ -103,17 +134,14 @@ class Game:
                     elif event.key == pygame.K_RETURN:
                         self.start_game_with_difficulty()
 
-            # GAME OVER → volver menú
             if self.state == "GAME_OVER":
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
                     self.state = "MENU"
 
-            # VICTORIA → volver menú
             if self.state == "VICTORY":
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
                     self.state = "MENU"
 
-        # Controles durante partida
         if self.state == "GAME":
             keys = pygame.key.get_pressed()
             self.pacman.handle_input(keys)
@@ -121,7 +149,6 @@ class Game:
             if keys[pygame.K_p]:
                 self.state = "PAUSE"
 
-        # PAUSA
         if self.state == "PAUSE":
             keys = pygame.key.get_pressed()
             if keys[pygame.K_r]:
@@ -132,72 +159,41 @@ class Game:
     # ================================================================
     def update(self, dt):
         if self.state == "GAME":
-
-            # --- Pac-Man ---
             self.pacman.update(dt)
 
-            # --- Fantasmas ---
             for ghost in self.ghosts:
                 ghost.update(dt)
 
-                # ===========================
-                # COLISIÓN PAC-MAN ↔ FANTASMA
-                # ===========================
                 if self.pacman.collides_with(ghost):
 
-                    # 1. Fantasma vulnerable (fright o blink)
+                    if ghost.state == "eyes":
+                        continue
+
                     if ghost.state in ["fright", "blink"]:
-
-                        # combo como Pac-Man clásico
-                        self.ghost_combo += 1  
-
-                        # puntos del combo
-                        points = 200 * (2 ** (self.ghost_combo - 1))
-                        self.hud.add_score(points)
-
-                        # fantasma → ojos
-                        ghost.enter_eyes()
-
-                        continue  # NO daña a Pac-Man
-
-
-                    # 2. Pac-Man invencible (otro power-up)
-                    if self.pacman.invincible:
                         self.ghost_combo += 1
                         points = 200 * (2 ** (self.ghost_combo - 1))
                         self.hud.add_score(points)
-
                         ghost.enter_eyes()
                         continue
 
-                    # 3. Fantasma normal → Pac-Man pierde vida
-                    self.ghost_combo = 0   # reset combo
+                    self.ghost_combo = 0
                     self.handle_pacman_hit()
                     return
 
+            if not any(g.state in ["fright", "blink"] for g in self.ghosts):
+                self.ghost_combo = 0
 
-            # ========================================
-            # REVISAR FIN DEL FRIGHT MODE GLOBAL
-            # (si ningún fantasma está en fright/blink)
-            # ========================================
-            any_fright = any(g.state in ["fright","blink"] for g in self.ghosts)
-            if not any_fright:
-                self.ghost_combo = 0   # reset combo
-
-
-        # ========================================
-        # ¿Nivel completado?
-        # ========================================
+        # Nivel completado
         if len(self.level.pellets) == 0 and len(self.level.powerups) == 0:
             self.current_level += 1
             self.load_next_level()
 
-
     # ================================================================
-    # RENDER
+    # RENDER — FULLSCREEN + ESCALADO AUTOMÁTICO
     # ================================================================
     def render(self):
-        self.screen.fill(DARK_BLUE)
+        # Dibujar en surface interna
+        self.game_surface.fill(DARK_BLUE)
 
         if self.state == "MENU":
             self.menu.draw(self.renderer)
@@ -215,6 +211,27 @@ class Game:
 
         elif self.state == "VICTORY":
             self.renderer.draw_text("¡VICTORIA!", 310, 260, (255, 255, 0), 40)
+
+        # ---- ESCALADO ----
+        window_w, window_h = self.screen.get_size()
+        game_w, game_h = self.game_surface.get_size()
+
+        scale_x = window_w / game_w
+        scale_y = window_h / game_h
+        scale = min(scale_x, scale_y)
+
+        scaled_w = int(game_w * scale)
+        scaled_h = int(game_h * scale)
+
+        scaled_surface = pygame.transform.smoothscale(
+            self.game_surface, (scaled_w, scaled_h)
+        )
+
+        x = (window_w - scaled_w) // 2
+        y = (window_h - scaled_h) // 2
+
+        self.screen.fill((0, 0, 0))
+        self.screen.blit(scaled_surface, (x, y))
 
         pygame.display.flip()
 
@@ -241,10 +258,9 @@ class Game:
         self.respawn_entities()
 
     # ================================================================
-    # RESPAWN PAC-MAN Y FANTASMAS
+    # RESPAWN ENTIDADES
     # ================================================================
     def respawn_entities(self):
-        # Respawn Pac-Man
         spawn_col, spawn_row = self.level.pacman_spawn
         self.pacman.x = spawn_col * TILE_SIZE + TILE_SIZE // 2
         self.pacman.y = spawn_row * TILE_SIZE + TILE_SIZE // 2
@@ -254,19 +270,13 @@ class Game:
         self.pacman.next_dir_x = 0
         self.pacman.next_dir_y = 0
 
-        # Respawn Fantasmas con velocidad del nivel
-        self.ghosts = []
+        self.ghosts.clear()
+
         base = self.difficulty["ghost_speed"]
         growth = self.difficulty["ghost_speed_growth"]
         speed = base * (growth ** (self.current_level - 1))
 
-        for col, row in self.level.ghost_spawns:
-            gx = col * TILE_SIZE + TILE_SIZE // 2
-            gy = row * TILE_SIZE + TILE_SIZE // 2
-            colors = ["red", "pink", "blue", "orange"]
-            i = len(self.ghosts) % 4
-            self.ghosts.append(Ghost(gx, gy, self.level, color=colors[i], speed=speed))
-
+        self.spawn_ghosts_for_level(speed=speed)
 
     # ================================================================
     # REINICIAR PARTIDA
@@ -274,22 +284,23 @@ class Game:
     def reset_game(self):
         self.hud.reset()
 
-        self.level = Level("levels/maps/level1.json", game=self)
+        self.ghosts.clear()
 
+        self.level = Level("levels/maps/level1.json", game=self)
         self.pacman.level = self.level
+
         self.respawn_entities()
 
     # ================================================================
-    # ACTIVAR POWER-UP
+    # POWER-UPS
     # ================================================================
     def freeze_ghosts(self, state):
         for ghost in self.ghosts:
             ghost.frozen = state
-    
+
     def activate_powerup(self, pacman, col, row):
         p = random.choice([
             SpeedBoost(),
-            Invincibility(),
             TimeFreeze(),
             ScoreMultiplier(),
             FrightMode()
@@ -297,7 +308,7 @@ class Game:
         pacman.add_effect(p)
 
     # ================================================================
-    # INICIO PARTIDA
+    # INICIO CON DIFICULTAD
     # ================================================================
     def start_game_with_difficulty(self):
         diff_name = self.menu.get_selected_difficulty()
@@ -308,15 +319,12 @@ class Game:
         self.state = "GAME"
 
     # ================================================================
-    # CARGAR SIGUIENTE NIVEL
+    # SIGUIENTE NIVEL
     # ================================================================
     def load_next_level(self):
-    # En vez de cambiar de archivo, solo recarga el mismo mapa
+        self.ghosts.clear()
+
         self.level = Level("levels/maps/level1.json", game=self)
         self.pacman.level = self.level
-        self.respawn_entities()
 
-
-        # Actualizar referencias
-        self.pacman.level = self.level
         self.respawn_entities()

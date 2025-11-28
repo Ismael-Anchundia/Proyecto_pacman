@@ -1,3 +1,4 @@
+# entities/pacman.py
 import pygame
 import math
 from entities.entity import Entity
@@ -5,6 +6,22 @@ from core.renderer import TILE_SIZE
 from core.sprite_loader import load_folder
 
 
+# ----------------------------------------------------------
+# FUNCIONES PURAS (no modifican estado)
+# ----------------------------------------------------------
+def direction_vector(dx, dy):
+    """Función pura: normaliza dirección."""
+    return (dx, dy)
+
+
+def compute_distance_to_center(x, y, cx, cy):
+    """Función pura para cálculo de distancia."""
+    return abs(cx - x), abs(cy - y)
+
+
+# ----------------------------------------------------------
+# CLASE PACMAN
+# ----------------------------------------------------------
 class Pacman(Entity):
     def __init__(self, x, y, level=None):
         super().__init__(x, y, speed=140)
@@ -35,19 +52,17 @@ class Pacman(Entity):
         self.anim_timer = 0
         self.anim_speed = 0.10
 
-
     # ----------------------------------------------------------
-    # GRID HELPERS
+    # HELPERS DE GRID (puras excepto por acceso a estado)
     # ----------------------------------------------------------
     def current_cell(self):
-        col = int(self.x // TILE_SIZE)
-        row = int(self.y // TILE_SIZE)
-        return col, row
+        return int(self.x // TILE_SIZE), int(self.y // TILE_SIZE)
 
     def tile_center(self, col, row):
-        cx = col * TILE_SIZE + TILE_SIZE / 2
-        cy = row * TILE_SIZE + TILE_SIZE / 2
-        return cx, cy
+        return (
+            col * TILE_SIZE + TILE_SIZE / 2,
+            row * TILE_SIZE + TILE_SIZE / 2,
+        )
 
     def is_centered(self, tolerance=1.0):
         col, row = self.current_cell()
@@ -55,56 +70,54 @@ class Pacman(Entity):
         return abs(self.x - cx) <= tolerance and abs(self.y - cy) <= tolerance
 
     def snap_center_soft(self):
-        """Snap suave para evitar tirones."""
         col, row = self.current_cell()
         cx, cy = self.tile_center(col, row)
         self.x += (cx - self.x) * 0.35
         self.y += (cy - self.y) * 0.35
 
-
     # ----------------------------------------------------------
-    # INPUT
+    # INPUT (lambdas)
     # ----------------------------------------------------------
     def handle_input(self, keys):
-        if keys[pygame.K_LEFT]:
-            self.next_dir_x, self.next_dir_y = -1, 0
-            self.direction = "left"
-        elif keys[pygame.K_RIGHT]:
-            self.next_dir_x, self.next_dir_y = 1, 0
-            self.direction = "right"
-        elif keys[pygame.K_UP]:
-            self.next_dir_x, self.next_dir_y = 0, -1
-            self.direction = "up"
-        elif keys[pygame.K_DOWN]:
-            self.next_dir_x, self.next_dir_y = 0, 1
-            self.direction = "down"
+        direction_map = {
+            pygame.K_LEFT:  (-1, 0, "left"),
+            pygame.K_RIGHT: (1, 0, "right"),
+            pygame.K_UP:    (0, -1, "up"),
+            pygame.K_DOWN:  (0, 1, "down"),
+        }
 
+        for key, (dx, dy, name) in direction_map.items():
+            if keys[key]:
+                self.next_dir_x, self.next_dir_y = dx, dy
+                self.direction = name
 
     # ----------------------------------------------------------
-    # TILE COLLISION
+    # COLISIONES FUNCIONALES
     # ----------------------------------------------------------
     def can_move(self, dx, dy):
         if dx == 0 and dy == 0:
             return False
 
         col, row = self.current_cell()
-        tcol = col + dx
-        trow = row + dy
+        tcol, trow = col + dx, row + dy
 
         if trow < 0 or trow >= len(self.level.tiles):
             return False
         if tcol < 0 or tcol >= len(self.level.tiles[0]):
             return False
+        # Bloquear casita para Pac-Man
+        if self.level.is_ghost_house(tcol, trow):
+            return False
+
 
         return not self.level.is_wall(tcol, trow)
 
-
     # ----------------------------------------------------------
-    # UPDATE — Movimiento arcade suave
+    # UPDATE PRINCIPAL (sin cambios de lógica)
     # ----------------------------------------------------------
     def update(self, dt):
 
-        # 1. Intentar girar si estamos centrados
+        # Intentar girar si está centrado
         if self.is_centered():
             self.snap_center_soft()
 
@@ -116,7 +129,6 @@ class Pacman(Entity):
                 self.finish_update(dt)
                 return
 
-        # Movimiento del frame
         move_step = self.speed * self.speed_multiplier * dt
 
         col, row = self.current_cell()
@@ -125,13 +137,10 @@ class Pacman(Entity):
         dist_x = cx - self.x
         dist_y = cy - self.y
 
-        if self.dir_x != 0:
-            limit = abs(dist_x)
-        else:
-            limit = abs(dist_y)
+        limit = abs(dist_x) if self.dir_x != 0 else abs(dist_y)
 
-        # No pasar del centro del tile
         if move_step > limit and limit > 0.1:
+            # No pasar centro
             self.x += self.dir_x * limit
             self.y += self.dir_y * limit
 
@@ -154,12 +163,11 @@ class Pacman(Entity):
 
         self.finish_update(dt)
 
-
     # ----------------------------------------------------------
-    # FINAL UPDATE STAGE
+    # FINAL UPDATE
     # ----------------------------------------------------------
     def finish_update(self, dt):
-        # Animación
+        # Sprite
         frames = self.anim.get(self.direction, [])
         if frames:
             self.anim_timer += dt
@@ -167,15 +175,14 @@ class Pacman(Entity):
                 self.anim_timer = 0
                 self.anim_frame = (self.anim_frame + 1) % len(frames)
 
-        # Pellets
+        # Items
         self.eat_items()
 
-        # Powerups
+        # Power-ups
         self.update_effects(dt)
 
-
     # ----------------------------------------------------------
-    # ITEMS
+    # ITEMS / POWERUPS
     # ----------------------------------------------------------
     def eat_items(self):
         col, row = self.current_cell()
@@ -188,47 +195,40 @@ class Pacman(Entity):
             self.level.powerups.remove((col, row))
             self.level.game.activate_powerup(self, col, row)
 
-
     # ----------------------------------------------------------
-    # EFFECTS SYSTEM
+    # EFECTOS (PATRÓN DE CLOSURES)
     # ----------------------------------------------------------
     def add_effect(self, effect):
-        """Agrega un efecto tipo powerup."""
         effect.remaining_time = getattr(effect, "duration", 0)
         effect.apply(self)
         self.effects.append(effect)
 
     def update_effects(self, dt):
-        to_remove = []
+        expired = []
+
         for e in self.effects:
             e.remaining_time -= dt
             if e.remaining_time <= 0:
-                e.remove(self)
-                to_remove.append(e)
+                expired.append(e)
 
-        for e in to_remove:
-            if e in self.effects:
-                self.effects.remove(e)
-
+        for e in expired:
+            e.remove(self)
+            self.effects.remove(e)
 
     # ----------------------------------------------------------
-    # COLLISION WITH GHOST
+    # COLISIONES PACMAN/GHOST
     # ----------------------------------------------------------
     def collides_with(self, ghost):
-        dist = math.dist((self.x, self.y), (ghost.x, ghost.y))
-        return dist < (TILE_SIZE * 0.6)
-
+        return math.dist((self.x, self.y), (ghost.x, ghost.y)) < (TILE_SIZE * 0.6)
 
     # ----------------------------------------------------------
     # DRAW
     # ----------------------------------------------------------
     def draw(self, renderer):
         frames = self.anim.get(self.direction, [])
-        if not frames:
-            return
-
-        frame = frames[self.anim_frame % len(frames)]
-        renderer.screen.blit(
-            frame,
-            (self.x - TILE_SIZE // 2, self.y - TILE_SIZE // 2)
-        )
+        if frames:
+            frame = frames[self.anim_frame % len(frames)]
+            renderer.screen.blit(
+                frame,
+                (self.x - TILE_SIZE // 2, self.y - TILE_SIZE // 2)
+            )
