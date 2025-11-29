@@ -3,10 +3,6 @@ import json
 from functools import partial
 
 
-# ==========================================================
-# AUXILIARES FUNCIONALES
-# ==========================================================
-
 def read_file(path):
     """Pura: solo lee texto."""
     with open(path, "r") as f:
@@ -42,17 +38,9 @@ def parse_txt_lines(lines):
     }
 
 
-# ==========================================================
-# TXT LOADER (100% funcional)
-# ==========================================================
-
 def load_txt_level(path):
     return parse_txt_lines(read_file(path))
 
-
-# ==========================================================
-# JSON LOADER (semi-funcional, conserva compatibilidad)
-# ==========================================================
 
 def load_json_level(path):
     with open(path, "r") as f:
